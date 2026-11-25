@@ -109,7 +109,7 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
                     do {
                         try store.commitSegment(recordingID: id, index: index, startOffset: offset, duration: duration)
                     } catch {
-                        // ファイルは .partial のまま残る。閉じる前の commitLeftoverSegments か、起動時の復旧で拾い直す
+                        // ファイルは書きかけの名前（000001.partial.m4a）のまま残る。閉じる前の commitLeftoverSegments か、起動時の復旧で拾い直す
                         let message = "区切り \(index) を台帳に載せられませんでした: \(error)"
                         Task { @MainActor in self?.lastError = message }
                     }

@@ -23,7 +23,8 @@ import Testing
         // 書きかけの拡張子は消え、確定した名前で残る
         let final = try store.fileURL(for: .segment(0), of: id)
         #expect(FileManager.default.fileExists(atPath: final.path))
-        #expect(!FileManager.default.fileExists(atPath: final.path + ".partial"))
+        let partial = try store.pendingSegmentURL(recordingID: id, index: 0)
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
 
         let closed = try store.closeRecording(id: id, endedAt: Date(), status: .finished)
         #expect(closed.status == .finished)
@@ -70,7 +71,7 @@ import Testing
         #expect(recording.status == .interrupted)
         #expect(recording.segments.map(\.index) == [0, 1])
         #expect(recording.segments[1].startOffset == 30)
-        let damaged = root.appendingPathComponent("recordings/\(id.rawValue)/damaged/000002.m4a.partial")
+        let damaged = root.appendingPathComponent("recordings/\(id.rawValue)/damaged/000002.partial.m4a")
         #expect(FileManager.default.fileExists(atPath: damaged.path)) // 消さずに残す
     }
 
@@ -124,6 +125,33 @@ import Testing
         var open = old
         open.status = .recording
         #expect(!weekly.mayDelete(open, fullyDelivered: true, now: now))
+    }
+
+    @Test func pendingSegmentKeepsFormatExtension() throws {
+        // AVAudioFile は拡張子から入れ物を決める。最後が .m4a でないと CAF で書かれる
+        let store = try FileRecordingStore(root: root)
+        _ = try store.createRecording(id: id, startedAt: Date(), format: .aacMono64k)
+        let url = try store.pendingSegmentURL(recordingID: id, index: 3)
+        #expect(url.lastPathComponent == "000003.partial.m4a")
+        #expect(url.pathExtension == "m4a")
+        #expect(FileRecordingStore.segmentIndex(fromPartial: url, ext: "m4a") == 3)
+        #expect(FileRecordingStore.segmentIndex(fromPartial: URL(fileURLWithPath: "/x/000004.m4a.partial"), ext: "m4a") == 4)
+        #expect(FileRecordingStore.segmentIndex(fromPartial: URL(fileURLWithPath: "/x/000005.m4a"), ext: "m4a") == nil)
+    }
+
+    @Test func legacyPartialIsStillRecovered() throws {
+        // 古い版が残した 000001.m4a.partial も拾う
+        let store = try FileRecordingStore(root: root)
+        _ = try store.createRecording(id: id, startedAt: Date(), format: .aacMono64k)
+        try writeSegment(store, index: 0)
+        try store.commitSegment(recordingID: id, index: 0, startOffset: 0, duration: 30)
+        let legacy = root.appendingPathComponent("recordings/\(id.rawValue)/segments/000001.m4a.partial")
+        try Data("legacy".utf8).write(to: legacy)
+
+        let adopted = try store.commitLeftoverSegments(recordingID: id) { _ in 10 }
+        #expect(adopted.map(\.index) == [1])
+        #expect(adopted.first?.fileName == "000001.m4a")
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
     }
 }
 

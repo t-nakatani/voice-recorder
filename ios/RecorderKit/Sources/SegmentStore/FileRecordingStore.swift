@@ -7,7 +7,7 @@ import RecorderCore
 /// ```
 /// root/recordings/<録音ID>/recording.json        台帳（原子的に書き換える）
 /// root/recordings/<録音ID>/segments/000000.m4a  閉じた区切り
-/// root/recordings/<録音ID>/segments/000001.m4a.partial  書きかけ
+/// root/recordings/<録音ID>/segments/000001.partial.m4a  書きかけ（拡張子を .m4a にしておかないと AVAudioFile が CAF で書く）
 /// root/recordings/<録音ID>/manifest.json         録音を閉じたときに書く
 /// root/recordings/<録音ID>/damaged/              復旧できなかった書きかけ（消さずに残す）
 /// ```
@@ -54,8 +54,12 @@ public final class FileRecordingStore: RecordingStore, @unchecked Sendable {
             if let existing = recording.segments.first(where: { $0.index == index }) {
                 return existing // 二重に呼ばれても同じ結果
             }
-            let partial = partialURL(recordingID, index: index, ext: recording.format.fileExtension)
-            let final = segmentURL(recordingID, index: index, ext: recording.format.fileExtension)
+            let ext = recording.format.fileExtension
+            // 古い版が残した書きかけ（000001.m4a.partial）も拾う
+            let partial = [partialURL(recordingID, index: index, ext: ext),
+                           legacyPartialURL(recordingID, index: index, ext: ext)]
+                .first { fileManager.fileExists(atPath: $0.path) } ?? partialURL(recordingID, index: index, ext: ext)
+            let final = segmentURL(recordingID, index: index, ext: ext)
             if fileManager.fileExists(atPath: partial.path) {
                 if fileManager.fileExists(atPath: final.path) { try fileManager.removeItem(at: final) }
                 try fileManager.moveItem(at: partial, to: final)
@@ -151,7 +155,7 @@ public final class FileRecordingStore: RecordingStore, @unchecked Sendable {
     }
 
     /// 台帳に載っていない区切りファイルを拾って台帳に載せる。録音を閉じる前と、起動時の復旧で呼ぶ。
-    /// - 書きかけ（.partial）: 読めれば載せ、読めなければ `damaged/` に移す（消さない）
+    /// - 書きかけ（000001.partial.m4a、古い版の 000001.m4a.partial）: 読めれば載せ、読めなければ `damaged/` に移す（消さない）
     /// - 名前は確定したのに台帳に載っていないもの（台帳の書き込みだけ失敗した）: 読めれば載せる
     /// - Returns: 新しく載せた区切り
     @discardableResult
@@ -165,7 +169,7 @@ public final class FileRecordingStore: RecordingStore, @unchecked Sendable {
         // 区切り番号 → 拾うファイル（同じ番号に確定済みと書きかけの両方があれば書きかけを優先して commit が上書きする）
         var leftovers: [Int: URL] = [:]
         for file in files {
-            if file.pathExtension == "partial", let index = Self.segmentIndex(fromPartial: file) {
+            if let index = Self.segmentIndex(fromPartial: file, ext: recording.format.fileExtension) {
                 if known.contains(index) { try quarantine(file, of: recordingID) } else { leftovers[index] = file }
             } else if file.pathExtension == recording.format.fileExtension,
                       let index = Int(file.deletingPathExtension().lastPathComponent),
@@ -205,13 +209,23 @@ public final class FileRecordingStore: RecordingStore, @unchecked Sendable {
     func segmentURL(_ id: RecordingID, index: Int, ext: String) -> URL {
         directory(for: id).appendingPathComponent("segments/\(String(format: "%06d", index)).\(ext)")
     }
+    /// 書きかけの名前。最後の拡張子を録音の形式（m4a）にする。AVAudioFile は拡張子から入れ物を決めるため、
+    /// `.partial` で終わる名前だと AAC を CAF の入れ物で書いてしまう。
     func partialURL(_ id: RecordingID, index: Int, ext: String) -> URL {
+        directory(for: id).appendingPathComponent("segments/\(String(format: "%06d", index)).partial.\(ext)")
+    }
+    /// 古い版の書きかけの名前（000003.m4a.partial）。中身は CAF だが、復旧では読めれば拾う。
+    func legacyPartialURL(_ id: RecordingID, index: Int, ext: String) -> URL {
         segmentURL(id, index: index, ext: ext).appendingPathExtension("partial")
     }
 
-    static func segmentIndex(fromPartial url: URL) -> Int? {
-        // 000003.m4a.partial -> 3
-        Int(url.deletingPathExtension().deletingPathExtension().lastPathComponent)
+    /// 書きかけのファイルなら区切り番号を返す。000003.partial.m4a と 000003.m4a.partial -> 3
+    static func segmentIndex(fromPartial url: URL, ext: String) -> Int? {
+        let name = url.lastPathComponent
+        for suffix in [".partial.\(ext)", ".\(ext).partial"] where name.hasSuffix(suffix) {
+            return Int(name.dropLast(suffix.count))
+        }
+        return nil
     }
 
     // MARK: 読み書き
