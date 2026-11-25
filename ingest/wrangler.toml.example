@@ -1,0 +1,32 @@
+# Worker の設定の例。wrangler.toml にコピーして、<...> を自分の値に置き換える（wrangler.toml はコミットしない）。
+# iPhone の録音アプリ（../ios）から呼ばれる口。人ではなく端末から呼ばれるため、端末トークンで守る。
+# 端末トークンそのものは置かず、SHA-256 だけを DEVICE_TOKEN_SHA256 に置く（src/auth.ts）。
+name = "voice-recorder-ingest"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+account_id = "<CLOUDFLARE_ACCOUNT_ID>"
+workers_dev = true
+preview_urls = false
+
+# ログには録音のキーと失敗の種類だけを出す。トークンと署名付きURLは出さない
+[observability]
+enabled = true
+
+# 主宛先。複製の読み出し元にもなる
+[[r2_buckets]]
+binding = "RECORDINGS"
+bucket_name = "<R2_BUCKET_NAME>"
+
+[vars]
+R2_BUCKET = "<R2_BUCKET_NAME>"
+R2_ACCOUNT_ID = "<CLOUDFLARE_ACCOUNT_ID>"
+PRESIGN_EXPIRES_SECONDS = "900"
+# R2 の x-amz-checksum-sha256 の扱いを実機で確かめてから "true" にする
+REQUIRE_CHECKSUM = "false"
+# 複製先（src/replicate.ts の ReplicaTarget の JSON 配列）。使うときは R2 のイベント通知と Queue の consumer も足す（README）
+REPLICA_TARGETS = "[]"
+
+# secret（値はここに書かず `wrangler secret put <名前>` で入れる）:
+# R2_ACCESS_KEY_ID      … バケットだけに Object Read & Write できる R2 API トークンの S3 用のアクセスキー
+# R2_SECRET_ACCESS_KEY  … 同じトークンの S3 用のシークレット
+# DEVICE_TOKEN_SHA256   … 端末トークンの SHA-256（カンマ区切り）。端末を失くしたら、その値を消して入れ直す

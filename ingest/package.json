@@ -1,0 +1,30 @@
+{
+  "name": "voice-recorder-ingest",
+  "private": true,
+  "type": "module",
+  "description": "iPhone の録音アプリに R2 の署名付き PUT URL を出し、置かれた録音を他の宛先へ複製する",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "deploy": "pnpm test && wrangler deploy"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7",
+    "wrangler": "4.145.0"
+  },
+  "packageManager": "pnpm@10.34.9",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ],
+    "ignoredBuiltDependencies": [
+      "fsevents"
+    ]
+  }
+}

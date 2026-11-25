@@ -1,0 +1,81 @@
+# XcodeGen の設定。`xcodegen generate` で VoiceRecorder.xcodeproj を作る（.xcodeproj はコミットしない。ios/ で実行する）。
+# 署名には自分の Apple Developer のチームを使う。Team ID は git に書かず、環境変数で渡す: DEVELOPMENT_TEAM=<Team ID> xcodegen generate
+# バンドルID・App Group を変えるときは、下の settings と Shared/・App/・Widget/ の定数もそろえる。
+name: VoiceRecorder
+options:
+  bundleIdPrefix: com.uniedge-labs
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  RecorderKit:
+    path: RecorderKit
+targets:
+  VoiceRecorder:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Shared
+    dependencies:
+      - package: RecorderKit
+        product: RecorderRuntime
+      - package: RecorderKit
+        product: RecordingControl
+      - package: RecorderKit
+        product: AudioCapture
+      - package: RecorderKit
+        product: Destinations
+      - package: RecorderKit
+        product: RecorderCore
+      - package: RecorderKit
+        product: UploadQueue
+      - target: VoiceRecorderWidgets
+        embed: true
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: 録音
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio, fetch]
+        NSMicrophoneUsageDescription: 録音してサーバーに送るためにマイクを使います。
+        NSSupportsLiveActivities: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    entitlements:
+      path: App/VoiceRecorder.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.uniedge-labs.voicerecorder]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.uniedge-labs.voicerecorder
+  VoiceRecorderWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widget
+      - Shared
+    dependencies:
+      - package: RecorderKit
+        product: RecordingControl
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: 録音
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widget/VoiceRecorderWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.uniedge-labs.voicerecorder]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.uniedge-labs.voicerecorder.widgets
