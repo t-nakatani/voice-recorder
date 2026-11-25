@@ -108,4 +108,4 @@ Queue とイベント通知は `wrangler queues create` と `wrangler r2 bucket 
 
 ## ライセンス
 
-TODO（MIT の予定。決まったら LICENSE を置く）
+MIT（[LICENSE](LICENSE) を参照）
