@@ -26,6 +26,7 @@ struct DebugRootView: View {
                         RecordingRow(recording: recording, summary: service.summaries[recording.id])
                     }
                 }
+                IntentLogSection()
             }
             .navigationTitle("録音")
             .toolbar {
@@ -158,5 +159,35 @@ struct DestinationSettingsView: View {
     private func save() {
         try? built.destinationConfigs.save(configs)
         Task { await AppEnvironment.reloadDestinations(built) }
+    }
+}
+
+/// ロック画面・コントロール・Live Activity から動いた intent の記録（どのプロセスで動いたか、結果）。
+struct IntentLogSection: View {
+    @State private var crumbs: [IntentBreadcrumb] = []
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Section("intent の記録（新しい順）") {
+            if crumbs.isEmpty {
+                Text("まだありません").font(.footnote).foregroundStyle(.secondary)
+            }
+            ForEach(Array(crumbs.prefix(10).enumerated()), id: \.offset) { _, crumb in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(crumb.at.formatted(date: .omitted, time: .standard))  \(crumb.intent)")
+                        .font(.footnote.bold())
+                    Text("プロセス: \(crumb.process)  handler: \(crumb.handlerAvailable ? "あり" : "なし")")
+                        .font(.caption)
+                    Text(crumb.outcome).font(.caption)
+                        .foregroundStyle(crumb.outcome.hasPrefix("ok") ? Color.secondary : Color.red)
+                }
+            }
+        }
+        .onAppear(perform: reload)
+        .onChange(of: scenePhase) { _, phase in if phase == .active { reload() } }
+    }
+
+    private func reload() {
+        crumbs = IntentDiagnostics(suiteName: AppConfig.appGroup).recent()
     }
 }

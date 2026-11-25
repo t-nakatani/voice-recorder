@@ -1,3 +1,4 @@
+import os
 import AudioCapture
 import Foundation
 import RecorderCore
@@ -45,6 +46,8 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
 
     public var isRecording: Bool { activeRecording != nil }
 
+    static let logger = Logger(subsystem: "com.uniedge-labs.voicerecorder", category: "recording")
+
     // MARK: 起動
 
     /// アプリ起動時に1回呼ぶ。落ちて残った録音の復旧 → 送信状態の突き合わせ → 未送信の送信。
@@ -86,7 +89,11 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
 
     public func startRecording(trigger: RecordingTrigger) async throws {
         _ = pendingStart.consume(now: clock.now())
-        guard activeRecording == nil else { return }
+        guard activeRecording == nil else {
+            Self.logger.notice("start ignored: already recording (trigger=\(trigger.rawValue, privacy: .public))")
+            return
+        }
+        Self.logger.notice("start trigger=\(trigger.rawValue, privacy: .public)")
         let id = RecordingID.make(at: clock.now())
         let recording = try store.createRecording(id: id, startedAt: clock.now(), format: format)
         activeRecording = recording
@@ -97,6 +104,7 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
             try activity.begin(recordingID: id.rawValue, state: .init(startedAt: recording.startedAt))
         } catch {
             lastError = "Live Activity を出せませんでした: \(error)"
+            Self.logger.error("live activity failed: \(String(describing: error), privacy: .public)")
         }
 
         let store = self.store
@@ -121,13 +129,18 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
             try? store.closeRecording(id: id, endedAt: clock.now(), status: .interrupted)
             await activity.end(nil)
             lastError = "録音を始められませんでした: \(error)"
+            Self.logger.error("capture start failed: \(String(describing: error), privacy: .public)")
             throw error
         }
         await refresh()
     }
 
     public func stopRecording() async throws {
-        guard let recording = activeRecording else { return }
+        guard let recording = activeRecording else {
+            Self.logger.notice("stop ignored: not recording")
+            return
+        }
+        Self.logger.notice("stop recording=\(recording.id.rawValue, privacy: .public)")
         capture.stop() // 書きかけの区切りを閉じて台帳に載せてから戻る
         activeRecording = nil
         isPaused = false

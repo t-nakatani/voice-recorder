@@ -1,5 +1,6 @@
 import AudioCapture
 import RecorderRuntime
+import RecordingControl
 import SwiftUI
 import UIKit
 
@@ -34,6 +35,10 @@ struct VoiceRecorderApp: App {
         _service = StateObject(wrappedValue: built.service)
         let service = built.service
         network.start { Task { @MainActor in await service.kickUploads() } }
+        // 停止の intent がウィジェット拡張で動いたときは、Darwin 通知で届く
+        CrossProcessCommand.stop.observe {
+            Task { @MainActor in try? await service.stopRecording() }
+        }
         Task { @MainActor in await service.launch() }
     }
 
