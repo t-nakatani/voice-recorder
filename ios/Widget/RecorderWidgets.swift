@@ -48,7 +48,7 @@ struct RecordingLiveActivity: Widget {
                     .foregroundStyle(.red)
                 VStack(alignment: .leading) {
                     Text(context.state.isPaused ? "一時停止中" : "録音中").font(.headline)
-                    Text(context.state.startedAt, style: .timer).monospacedDigit()
+                    ElapsedText(state: context.state).monospacedDigit()
                     Text("送信 \(context.state.uploadedSegments)/\(context.state.totalSegments)").font(.caption)
                 }
                 Spacer()
@@ -64,7 +64,7 @@ struct RecordingLiveActivity: Widget {
                     Image(systemName: "record.circle").foregroundStyle(.red)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.startedAt, style: .timer).monospacedDigit()
+                    ElapsedText(state: context.state).monospacedDigit()
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Button(intent: StopRecordingIntent()) { Image(systemName: "stop.fill") }
@@ -72,10 +72,24 @@ struct RecordingLiveActivity: Widget {
             } compactLeading: {
                 Image(systemName: "record.circle").foregroundStyle(.red)
             } compactTrailing: {
-                Text(context.state.startedAt, style: .timer).monospacedDigit().frame(width: 44)
+                ElapsedText(state: context.state).monospacedDigit().frame(width: 44)
             } minimal: {
                 Image(systemName: "record.circle").foregroundStyle(.red)
             }
+        }
+    }
+}
+
+/// 録音中は開始からの経過を数え、止めた後は止めた時点の長さで止まる。
+struct ElapsedText: View {
+    let state: RecordingActivityAttributes.ContentState
+
+    var body: some View {
+        if let endedAt = state.endedAt {
+            Text(Duration.seconds(max(0, endedAt.timeIntervalSince(state.startedAt)))
+                .formatted(.time(pattern: .minuteSecond)))
+        } else {
+            Text(state.startedAt, style: .timer)
         }
     }
 }

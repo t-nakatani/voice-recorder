@@ -23,7 +23,8 @@ struct DebugRootView: View {
                 }
                 Section("録音") {
                     ForEach(service.recordings) { recording in
-                        RecordingRow(recording: recording, summary: service.summaries[recording.id])
+                        RecordingRow(recording: recording, summary: service.summaries[recording.id],
+                                     peaks: service.segmentPeaks[recording.id] ?? [:])
                     }
                 }
                 IntentLogSection()
@@ -74,12 +75,20 @@ struct RecordButton: View {
 struct RecordingRow: View {
     let recording: Recording
     let summary: DeliverySummary?
+    /// 区切り番号 → 最大音量（dBFS）
+    let peaks: [Int: Double]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(recording.startedAt.formatted(date: .abbreviated, time: .standard)).font(.headline)
             Text("\(recording.status.rawValue)・\(Int(recording.totalDuration))秒・区切り \(recording.segments.count) 個")
                 .font(.caption)
+            if !peaks.isEmpty {
+                let silent = peaks.values.allSatisfy { $0 < -90 }
+                Text("音量（区切りごとの最大）: " + peaks.keys.sorted().map { Self.label(peaks[$0]!) }.joined(separator: " / "))
+                    .font(.caption2)
+                    .foregroundStyle(silent ? Color.red : Color.secondary)
+            }
             ForEach(summary?.perDestination ?? [], id: \.destination) { row in
                 HStack {
                     Image(systemName: row.isComplete ? "checkmark.circle.fill" : "arrow.up.circle")
@@ -95,6 +104,9 @@ struct RecordingRow: View {
                 Text("宛先が未設定です（iPhone 内には保存済み）").font(.caption2).foregroundStyle(.secondary)
             }
         }
+    }
+    static func label(_ dBFS: Double) -> String {
+        dBFS < -90 ? "無音" : "\(Int(dBFS.rounded())) dBFS"
     }
 }
 
@@ -185,6 +197,13 @@ struct IntentLogSection: View {
         }
         .onAppear(perform: reload)
         .onChange(of: scenePhase) { _, phase in if phase == .active { reload() } }
+        // 画面を開いたままでも、ロック画面や Live Activity から動いた intent の記録が出るように読み直す
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                reload()
+            }
+        }
     }
 
     private func reload() {

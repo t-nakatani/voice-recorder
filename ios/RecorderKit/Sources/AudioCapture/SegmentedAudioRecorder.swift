@@ -29,6 +29,10 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
     private var running = false
     private var paused = false
     private var observers: [NSObjectProtocol] = []
+    /// 書きかけの区切りの最大振幅（0...1）
+    private var segmentPeak: Float = 0
+    /// 区切りを閉じたときに、その区切りの最大振幅（dBFS。無音は -inf）を知らせる。無音で録れていないかを見るため
+    public var onSegmentLevel: (@Sendable (_ index: Int, _ peakDBFS: Double) -> Void)?
 
     public init(settings: Settings = Settings(), session: AudioSessionControlling = AudioSessionController()) {
         self.settings = settings
@@ -104,7 +108,10 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
     /// ファイルを閉じて、閉じた区切りを返す。AVAudioFile は解放したときに書き終わる。
     private func closeFileLocked() -> (Int, TimeInterval, TimeInterval)? {
         file = nil
+        let peak = segmentPeak
+        segmentPeak = 0
         guard let closed = planner?.closeCurrent() else { return nil }
+        onSegmentLevel?(closed.index, Self.dBFS(peak))
         return (closed.index, closed.startOffset, closed.duration)
     }
 
@@ -116,6 +123,7 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
             guard running, !paused, let file else { return }
             do {
                 try file.write(from: buffer)
+            segmentPeak = max(segmentPeak, Self.peak(of: buffer))
                 if planner?.didWrite(frames: Int(buffer.frameLength)) == true {
                     finished = closeFileLocked()
                     try openFileLocked(format: buffer.format)
@@ -215,6 +223,32 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
         }
         if let closed { onEvent?(.segmentFinished(index: closed.0, startOffset: closed.1, duration: closed.2)) }
         if let failure { onEvent?(.failed(message: "入力の切り替え後に再開できませんでした: \(failure)")) }
+    }
+}
+
+extension SegmentedAudioRecorder {
+    // MARK: 音量
+
+    static func peak(of buffer: AVAudioPCMBuffer) -> Float {
+        let frames = Int(buffer.frameLength)
+        var peak: Float = 0
+        if let channels = buffer.floatChannelData {
+            for c in 0..<Int(buffer.format.channelCount) {
+                let data = channels[c]
+                for i in 0..<frames { peak = max(peak, abs(data[i])) }
+            }
+        } else if let channels = buffer.int16ChannelData {
+            for c in 0..<Int(buffer.format.channelCount) {
+                let data = channels[c]
+                for i in 0..<frames { peak = max(peak, Float(abs(Int32(data[i]))) / 32768) }
+            }
+        }
+        return peak
+    }
+
+    /// 0...1 の振幅を dBFS にする。0 は -infinity
+    public static func dBFS(_ amplitude: Float) -> Double {
+        amplitude > 0 ? 20 * log10(Double(amplitude)) : -.infinity
     }
 }
 

@@ -31,3 +31,11 @@ import Testing
         #expect(planner.currentDuration == 0.5)
     }
 }
+
+@Suite struct LevelTests {
+    @Test func dBFSOfSilenceIsNegativeInfinity() {
+        #expect(SegmentedAudioRecorder.dBFS(0) == -.infinity)
+        #expect(SegmentedAudioRecorder.dBFS(1) == 0)
+        #expect(abs(SegmentedAudioRecorder.dBFS(0.5) - (-6.0206)) < 0.001)
+    }
+}

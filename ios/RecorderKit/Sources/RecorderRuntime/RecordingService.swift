@@ -15,6 +15,11 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
     @Published public private(set) var summaries: [RecordingID: DeliverySummary] = [:]
     @Published public private(set) var lastError: String?
     @Published public private(set) var isPaused = false
+    /// 区切りごとの最大音量（dBFS）。無音で録れていないかを画面で見るため。録音ID → 区切り番号 → dBFS
+    @Published public private(set) var segmentPeaks: [RecordingID: [Int: Double]] = [:]
+    /// 音量の知らせを受ける録音（止めた直後に閉じた区切りの分も受けるため、次の録音を始めるまで残す）
+    private var levelRecordingID: RecordingID?
+    private let levels: SegmentLevelStore
 
     public let store: FileRecordingStore
     public let ledger: DeliveryLedger
@@ -32,7 +37,10 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
 
     public init(store: FileRecordingStore, ledger: DeliveryLedger, scheduler: UploadScheduler, capture: AudioCapturing,
                 activity: RecordingActivityPresenting, format: AudioFormat = .aacMono64k,
-                retention: RetentionPolicy = .keepForever, pendingStart: PendingStartFlag, clock: Clock = SystemClock()) {
+                retention: RetentionPolicy = .keepForever, pendingStart: PendingStartFlag, clock: Clock = SystemClock(),
+                levels: SegmentLevelStore = SegmentLevelStore(suiteName: nil)) {
+        self.levels = levels
+        self.segmentPeaks = levels.load()
         self.store = store
         self.ledger = ledger
         self.scheduler = scheduler
@@ -54,6 +62,8 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
     public func launch() async {
         guard !launched else { return }
         launched = true
+        // 録音していないのに残っている Live Activity（落ちた・止めたのに消えなかった等）を消す
+        if activeRecording == nil { await activity.endAll() }
         do {
             try store.recoverUnclosedRecordings(except: activeRecording?.id, probeDuration: AudioFileProbe.duration(of:))
         } catch {
@@ -98,6 +108,7 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
         let recording = try store.createRecording(id: id, startedAt: clock.now(), format: format)
         activeRecording = recording
         isPaused = false
+        levelRecordingID = id
 
         // AudioRecordingIntent の決まり: 録音を始めたら Live Activity を出す
         do {
@@ -127,7 +138,7 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
         } catch {
             activeRecording = nil
             try? store.closeRecording(id: id, endedAt: clock.now(), status: .interrupted)
-            await activity.end(nil)
+            await activity.end(recordingID: id.rawValue, state: nil)
             lastError = "録音を始められませんでした: \(error)"
             Self.logger.error("capture start failed: \(String(describing: error), privacy: .public)")
             throw error
@@ -153,10 +164,10 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
         do {
             try store.commitLeftoverSegments(recordingID: id, probeDuration: AudioFileProbe.duration(of:))
             let closed = try store.closeRecording(id: id, endedAt: clock.now(), status: status)
-            await activity.end(activityState(for: closed))
+            await activity.end(recordingID: id.rawValue, state: activityState(for: closed, endedAt: closed.endedAt ?? clock.now()))
         } catch {
             lastError = "録音を閉じられませんでした（ファイルは iPhone に残っています。次の起動時に復旧します）: \(error)"
-            await activity.end(nil)
+            await activity.end(recordingID: id.rawValue, state: nil)
             await scheduler.pump()
             await refresh()
             throw error
@@ -204,11 +215,18 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
         scheduleRetryTimer()
     }
 
-    private func activityState(for recording: Recording) -> RecordingActivityAttributes.ContentState {
+    /// 録音部品から区切りの最大音量を受け取る（AppEnvironment がつなぐ）
+    public func noteSegmentLevel(index: Int, peakDBFS: Double) {
+        guard let id = levelRecordingID else { return }
+        segmentPeaks[id, default: [:]][index] = peakDBFS
+        levels.save(segmentPeaks)
+    }
+
+    private func activityState(for recording: Recording, endedAt: Date? = nil) -> RecordingActivityAttributes.ContentState {
         let primary = summaries[recording.id]?.perDestination.first
         return .init(startedAt: recording.startedAt, isPaused: isPaused,
                      uploadedSegments: min(primary?.delivered ?? 0, recording.segments.count),
-                     totalSegments: recording.segments.count)
+                     totalSegments: recording.segments.count, endedAt: endedAt)
     }
 
     /// 次の再送時刻にタイマーを張る（アプリが動いている間だけ。止まっている間は起動時・ネット回復時に拾う）。

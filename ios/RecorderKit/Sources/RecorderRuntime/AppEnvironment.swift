@@ -55,7 +55,11 @@ public enum AppEnvironment {
 
         let service = RecordingService(store: store, ledger: ledger, scheduler: scheduler, capture: capture,
                                        activity: activity, retention: settings.retention,
-                                       pendingStart: PendingStartFlag(suiteName: settings.appGroup))
+                                       pendingStart: PendingStartFlag(suiteName: settings.appGroup),
+                                       levels: SegmentLevelStore(suiteName: settings.appGroup))
+        capture.onSegmentLevel = { [weak service] index, peak in
+            Task { @MainActor in service?.noteSegmentLevel(index: index, peakDBFS: peak) }
+        }
         RecordingCommandCenter.shared.handler = service
         return Built(service: service, transport: transport, tokens: tokens, destinationConfigs: configs)
     }

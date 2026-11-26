@@ -8,7 +8,10 @@ import ActivityKit
 public protocol RecordingActivityPresenting: AnyObject, Sendable {
     func begin(recordingID: String, state: RecordingActivityAttributes.ContentState) throws
     func update(_ state: RecordingActivityAttributes.ContentState) async
-    func end(_ state: RecordingActivityAttributes.ContentState?) async
+    /// その録音の Live Activity を全部終わらせてすぐ消す。state があれば最後の表示にする
+    func end(recordingID: String, state: RecordingActivityAttributes.ContentState?) async
+    /// 録音していないのに残っている Live Activity を全部消す（落ちた・別プロセスで出した等）
+    func endAll() async
 }
 
 #if canImport(ActivityKit) && os(iOS)
@@ -36,12 +39,21 @@ public final class LiveActivityController: RecordingActivityPresenting, @uncheck
         await current?.update(ActivityContent(state: state, staleDate: nil))
     }
 
-    public func end(_ state: RecordingActivityAttributes.ContentState?) async {
-        let current = lock.withLock { () -> Activity<RecordingActivityAttributes>? in
-            defer { activity = nil }
-            return activity
+    public func end(recordingID: String, state: RecordingActivityAttributes.ContentState?) async {
+        lock.withLock { activity = nil }
+        // 覚えている1つだけでなく、その録音のものを全部終わらせる（別のプロセスや前の起動で出したものも含む）。
+        // .default だと終わった後もロック画面に最大4時間残るので、すぐ消す
+        let content = state.map { ActivityContent(state: $0, staleDate: nil) }
+        for item in Activity<RecordingActivityAttributes>.activities where item.attributes.recordingID == recordingID {
+            await item.end(content, dismissalPolicy: .immediate)
         }
-        await current?.end(state.map { ActivityContent(state: $0, staleDate: nil) }, dismissalPolicy: .default)
+    }
+
+    public func endAll() async {
+        lock.withLock { activity = nil }
+        for item in Activity<RecordingActivityAttributes>.activities {
+            await item.end(nil, dismissalPolicy: .immediate)
+        }
     }
 }
 #endif
@@ -51,5 +63,6 @@ public final class NoopActivityPresenter: RecordingActivityPresenting, @unchecke
     public init() {}
     public func begin(recordingID: String, state: RecordingActivityAttributes.ContentState) throws {}
     public func update(_ state: RecordingActivityAttributes.ContentState) async {}
-    public func end(_ state: RecordingActivityAttributes.ContentState?) async {}
+    public func end(recordingID: String, state: RecordingActivityAttributes.ContentState?) async {}
+    public func endAll() async {}
 }
