@@ -19,8 +19,6 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     public var totalDuration: TimeInterval
     public var format: AudioFormat
     public var segments: [Entry]
-    /// なぜ止まったか。"user" / "auto: silence" / "auto: max duration"。不明なら書かない
-    public var stopReason: StopReason?
 
     public init(recording: Recording) {
         version = 1
@@ -30,7 +28,6 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
         endedAt = recording.endedAt
         totalDuration = recording.totalDuration
         format = recording.format
-        stopReason = recording.stopReason
         segments = recording.segments.sorted { $0.index < $1.index }.map {
             Entry(index: $0.index,
                   key: ObjectKeys.segment(recording.id, index: $0.index, fileExtension: recording.format.fileExtension),

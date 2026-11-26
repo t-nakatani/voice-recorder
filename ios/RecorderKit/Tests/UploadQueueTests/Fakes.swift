@@ -27,7 +27,7 @@ final class FakeStore: RecordingStore, @unchecked Sendable {
     func createRecording(id: RecordingID, startedAt: Date, format: AudioFormat) throws -> Recording { fatalError() }
     func pendingSegmentURL(recordingID: RecordingID, index: Int) throws -> URL { fatalError() }
     func commitSegment(recordingID: RecordingID, index: Int, startOffset: TimeInterval, duration: TimeInterval) throws -> Segment { fatalError() }
-    func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus, stopReason: StopReason?) throws -> Recording { fatalError() }
+    func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus) throws -> Recording { fatalError() }
     func recording(id: RecordingID) throws -> Recording? { lock.withLock { recordings[id] } }
     func allRecordings() throws -> [Recording] { lock.withLock { Array(recordings.values) } }
     func fileURL(for item: UploadItem, of recordingID: RecordingID) throws -> URL {
