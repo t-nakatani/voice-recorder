@@ -33,6 +33,10 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
     private var segmentPeak: Float = 0
     /// 区切りを閉じたときに、その区切りの最大振幅（dBFS。無音は -inf）を知らせる。無音で録れていないかを見るため
     public var onSegmentLevel: (@Sendable (_ index: Int, _ peakDBFS: Double) -> Void)?
+    /// 約1秒ごとに、その間の最大音量（dBFS）を知らせる
+    public var onLevelSample: (@Sendable (_ peakDBFS: Double) -> Void)?
+    private var samplePeak: Float = 0
+    private var sampleFrames = 0
 
     public init(settings: Settings = Settings(), session: AudioSessionControlling = AudioSessionController()) {
         self.settings = settings
@@ -126,11 +130,20 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
     private func write(_ buffer: AVAudioPCMBuffer) {
         var finished: (Int, TimeInterval, TimeInterval)?
         var failure: String?
+        var sample: Double?
         lock.withLock {
             guard running, !paused, let file else { return }
             do {
                 try file.write(from: buffer)
-            segmentPeak = max(segmentPeak, Self.peak(of: buffer))
+                let bufferPeak = Self.peak(of: buffer)
+                segmentPeak = max(segmentPeak, bufferPeak)
+                samplePeak = max(samplePeak, bufferPeak)
+                sampleFrames += Int(buffer.frameLength)
+                if Double(sampleFrames) >= buffer.format.sampleRate {
+                    sample = Self.dBFS(samplePeak)
+                    samplePeak = 0
+                    sampleFrames = 0
+                }
                 if planner?.didWrite(frames: Int(buffer.frameLength)) == true {
                     finished = closeFileLocked()
                     try openFileLocked(format: buffer.format)
@@ -139,6 +152,7 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
                 failure = String(describing: error)
             }
         }
+        if let sample { onLevelSample?(sample) }
         if let finished { onEvent?(.segmentFinished(index: finished.0, startOffset: finished.1, duration: finished.2)) }
         if let failure {
             onEvent?(.failed(message: failure))

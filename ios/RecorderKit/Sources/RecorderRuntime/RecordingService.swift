@@ -36,6 +36,12 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
 
     private var listenTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    /// 無音が続いたとき・長さの上限で自動的に止める決まり（ロック中は停止ボタンに Face ID が要るため）
+    public var autoStopPolicy: AutoStopPolicy = .standard
+    /// 自動で止めたときに呼ぶ（AppEnvironment が intent の記録につなぐ）
+    public var onAutoStop: ((StopReason) -> Void)?
+    private var autoStop: AutoStopMonitor?
+    private var autoStopTask: Task<Void, Never>?
     private var launched = false
 
     public init(store: FileRecordingStore, ledger: DeliveryLedger, scheduler: UploadScheduler, capture: AudioCapturing,
@@ -151,29 +157,72 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
             Self.logger.error("capture start failed: \(note, privacy: .public)")
             throw RecordingStartFailure(note: note)
         }
+        startAutoStop(startedAt: recording.startedAt)
         await refresh()
         let method = (capture as? FallbackAudioCapture)?.lastMethod ?? "capture"
         return "\(appState)・\(activityNote)・\(method)"
     }
 
     public func stopRecording() async throws {
+        try await stopRecording(reason: .user)
+    }
+
+    /// 止める。手で止めたときも自動で止めたときも同じ道を通る（Live Activity をすぐ消し、録音を閉じて manifest を送る）
+    public func stopRecording(reason: StopReason) async throws {
         guard let recording = activeRecording else {
             Self.logger.notice("stop ignored: not recording")
             return
         }
-        Self.logger.notice("stop recording=\(recording.id.rawValue, privacy: .public)")
+        Self.logger.notice("stop recording=\(recording.id.rawValue, privacy: .public) reason=\(reason.rawValue, privacy: .public)")
+        stopAutoStop()
         capture.stop() // 書きかけの区切りを閉じて台帳に載せてから戻る
         activeRecording = nil
         isPaused = false
-        try await finalize(recording.id, status: .finished)
+        try await finalize(recording.id, status: .finished, stopReason: reason)
+    }
+
+    // MARK: 自動停止
+
+    /// 録音部品から約1秒ごとの最大音量を受け取る（AppEnvironment がつなぐ）
+    public func noteLevelSample(peakDBFS: Double) {
+        autoStop?.noteLevel(peakDBFS, at: clock.now())
+    }
+
+    private func startAutoStop(startedAt: Date) {
+        autoStop = AutoStopMonitor(policy: autoStopPolicy, startedAt: startedAt)
+        autoStopTask?.cancel()
+        autoStopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                await self.checkAutoStop()
+            }
+        }
+    }
+
+    private func stopAutoStop() {
+        autoStopTask?.cancel()
+        autoStopTask = nil
+        autoStop = nil
+    }
+
+    func checkAutoStop() async {
+        guard let reason = autoStop?.check(now: clock.now()), activeRecording != nil else { return }
+        Self.logger.notice("auto stop: \(reason.rawValue, privacy: .public)")
+        do {
+            try await stopRecording(reason: reason)
+        } catch {
+            lastError = "自動で止められませんでした: \(error)"
+        }
+        onAutoStop?(reason)
     }
 
     /// 録音を閉じる。台帳に載り損ねた区切りを先に拾い、拾えなければ閉じずに残す（次の起動時の復旧に任せる）。
     /// 閉じた録音は復旧の対象にならないので、区切りが欠けたまま manifest を作らないようにする。
-    private func finalize(_ id: RecordingID, status: RecordingStatus) async throws {
+    private func finalize(_ id: RecordingID, status: RecordingStatus, stopReason: StopReason? = nil) async throws {
         do {
             try store.commitLeftoverSegments(recordingID: id, probeDuration: AudioFileProbe.duration(of:))
-            let closed = try store.closeRecording(id: id, endedAt: clock.now(), status: status)
+            let closed = try store.closeRecording(id: id, endedAt: clock.now(), status: status, stopReason: stopReason)
             await activity.end(recordingID: id.rawValue, state: activityState(for: closed, endedAt: closed.endedAt ?? clock.now()))
         } catch {
             lastError = "録音を閉じられませんでした（ファイルは iPhone に残っています。次の起動時に復旧します）: \(error)"
@@ -194,12 +243,15 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
             await scheduler.pump()
         case .interrupted:
             isPaused = true
+            autoStop?.notePaused(at: clock.now())
         case .resumed:
             isPaused = false
+            autoStop?.noteResumed(at: clock.now())
         case .failed(let message):
             lastError = message
             if activeRecording?.id == recordingID {
                 // 録音部品を止めて状態を戻す（止めないと次の録音で start が何もせずに戻る）
+                stopAutoStop()
                 capture.stop()
                 activeRecording = nil
                 isPaused = false

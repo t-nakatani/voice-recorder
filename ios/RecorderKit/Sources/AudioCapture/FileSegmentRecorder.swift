@@ -35,6 +35,10 @@ public final class FileSegmentRecorder: AudioCapturing, @unchecked Sendable {
     private var paused = false
     private var observers: [NSObjectProtocol] = []
     public var onSegmentLevel: (@Sendable (_ index: Int, _ peakDBFS: Double) -> Void)?
+    /// 約1秒ごとに、その間の最大音量（dBFS。無音は -inf）を知らせる。無音が続いたら自動で止めるため
+    public var onLevelSample: (@Sendable (_ peakDBFS: Double) -> Void)?
+    private var samplePeakDB: Float = -.infinity
+    private var sampleTicks = 0
 
     public init(settings: Settings = Settings(), session: AudioSessionControlling = AudioSessionController()) {
         self.settings = settings
@@ -111,7 +115,10 @@ public final class FileSegmentRecorder: AudioCapturing, @unchecked Sendable {
         current.recorder.updateMeters()
         let peak = current.recorder.peakPower(forChannel: 0)
         // 完全な無音は -160 dB と出る
-        if peak > -160 { current.peakDB = max(current.peakDB, peak) }
+        if peak > -160 {
+            current.peakDB = max(current.peakDB, peak)
+            samplePeakDB = max(samplePeakDB, peak)
+        }
     }
 
     private func startTimerLocked() {
@@ -132,6 +139,12 @@ public final class FileSegmentRecorder: AudioCapturing, @unchecked Sendable {
         guard running, !paused, var current = active else { return }
         sampleLevel(&current)
         active = current
+        sampleTicks += 1
+        if sampleTicks >= 4 {
+            onLevelSample?(samplePeakDB.isFinite ? Double(samplePeakDB) : -.infinity)
+            sampleTicks = 0
+            samplePeakDB = -.infinity
+        }
         guard current.recorder.currentTime >= settings.segmentDuration else { return }
         let next: Active
         do {
@@ -240,6 +253,11 @@ public final class FallbackAudioCapture: AudioCapturing, @unchecked Sendable {
     public var onSegmentLevel: (@Sendable (_ index: Int, _ peakDBFS: Double) -> Void)? {
         get { primary.onSegmentLevel }
         set { primary.onSegmentLevel = newValue; fallback.onSegmentLevel = newValue }
+    }
+
+    public var onLevelSample: (@Sendable (_ peakDBFS: Double) -> Void)? {
+        get { primary.onLevelSample }
+        set { primary.onLevelSample = newValue; fallback.onLevelSample = newValue }
     }
 
     public var isRunning: Bool { (lock.withLock { current })?.isRunning ?? false }

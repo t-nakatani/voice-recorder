@@ -16,7 +16,7 @@ public protocol RecordingStore: AnyObject, Sendable {
     func commitSegment(recordingID: RecordingID, index: Int, startOffset: TimeInterval, duration: TimeInterval) throws -> Segment
     /// 録音を閉じ、manifest.json を書き出す。
     @discardableResult
-    func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus) throws -> Recording
+    func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus, stopReason: StopReason?) throws -> Recording
     func recording(id: RecordingID) throws -> Recording?
     func allRecordings() throws -> [Recording]
     /// 送信に使うファイルの場所（区切りファイル、または manifest）。
@@ -118,4 +118,11 @@ public protocol Clock: Sendable {
 public struct SystemClock: Clock {
     public init() {}
     public func now() -> Date { Date() }
+}
+
+extension RecordingStore {
+    @discardableResult
+    public func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus) throws -> Recording {
+        try closeRecording(id: id, endedAt: endedAt, status: status, stopReason: nil)
+    }
 }

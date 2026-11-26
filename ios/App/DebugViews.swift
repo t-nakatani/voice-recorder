@@ -81,7 +81,7 @@ struct RecordingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(recording.startedAt.formatted(date: .abbreviated, time: .standard)).font(.headline)
-            Text("\(recording.status.rawValue)・\(Int(recording.totalDuration))秒・区切り \(recording.segments.count) 個")
+            Text("\(recording.status.rawValue)・\(Int(recording.totalDuration))秒・区切り \(recording.segments.count) 個\(Self.reasonLabel(recording.stopReason))")
                 .font(.caption)
             if !peaks.isEmpty {
                 let silent = peaks.values.allSatisfy { $0 < -90 }
@@ -105,6 +105,14 @@ struct RecordingRow: View {
             }
         }
     }
+    static func reasonLabel(_ reason: StopReason?) -> String {
+        switch reason {
+        case .silence: "・自動停止（無音が続いた）"
+        case .maxDuration: "・自動停止（長さの上限）"
+        case .user, nil: ""
+        }
+    }
+
     static func label(_ dBFS: Double) -> String {
         dBFS < -90 ? "無音" : "\(Int(dBFS.rounded())) dBFS"
     }

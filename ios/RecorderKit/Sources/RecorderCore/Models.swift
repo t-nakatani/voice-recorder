@@ -63,6 +63,8 @@ public struct Recording: Codable, Equatable, Sendable, Identifiable {
     public var status: RecordingStatus
     public var format: AudioFormat
     public var segments: [Segment]
+    /// なぜ止まったか（手で止めた・無音が続いた・長さの上限）。古い台帳には無い
+    public var stopReason: StopReason?
 
     public init(id: RecordingID, startedAt: Date, endedAt: Date? = nil, status: RecordingStatus,
                 format: AudioFormat, segments: [Segment] = []) {

@@ -80,12 +80,14 @@ public final class FileRecordingStore: RecordingStore, @unchecked Sendable {
     }
 
     @discardableResult
-    public func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus) throws -> Recording {
+    public func closeRecording(id: RecordingID, endedAt: Date, status: RecordingStatus,
+                               stopReason: StopReason? = nil) throws -> Recording {
         precondition(status != .recording, "closeRecording には終了後の状態を渡す")
         return try lock.withLock {
             var recording = try readLedger(id)
             recording.status = status
             recording.endedAt = endedAt
+            recording.stopReason = stopReason
             try writeManifest(for: recording)
             return try writeLedger(recording)
         }

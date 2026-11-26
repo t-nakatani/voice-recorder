@@ -61,6 +61,14 @@ public enum AppEnvironment {
         capture.onSegmentLevel = { [weak service] index, peak in
             Task { @MainActor in service?.noteSegmentLevel(index: index, peakDBFS: peak) }
         }
+        capture.onLevelSample = { [weak service] peak in
+            Task { @MainActor in service?.noteLevelSample(peakDBFS: peak) }
+        }
+        let diagnostics = IntentDiagnostics(suiteName: settings.appGroup)
+        service.onAutoStop = { reason in
+            diagnostics.record(.init(at: Date(), intent: "AutoStop", process: IntentDiagnostics.currentProcess,
+                                     handlerAvailable: true, outcome: "ok（\(reason.rawValue)）"))
+        }
         RecordingCommandCenter.shared.handler = service
         return Built(service: service, transport: transport, tokens: tokens, destinationConfigs: configs)
     }
