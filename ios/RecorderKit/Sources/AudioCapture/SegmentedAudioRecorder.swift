@@ -51,7 +51,14 @@ public final class SegmentedAudioRecorder: AudioCapturing, @unchecked Sendable {
             let format = engine.inputNode.outputFormat(forBus: 0)
             planner = SegmentPlanner(segmentDuration: settings.segmentDuration, sampleRate: format.sampleRate,
                                      firstIndex: firstIndex)
-            try startEngineLocked()
+            do {
+                try startEngineLocked()
+            } catch {
+                // 書きかけのファイルとタップを残さない（セッションは呼び出し側が閉じる）
+                stopEngineLocked()
+                file = nil
+                throw error
+            }
             running = true
             paused = false
         }

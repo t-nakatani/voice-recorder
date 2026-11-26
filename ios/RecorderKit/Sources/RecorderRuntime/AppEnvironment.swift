@@ -46,7 +46,8 @@ public enum AppEnvironment {
         let transport = BackgroundURLSessionTransport(sharedContainerIdentifier: settings.appGroup)
         let scheduler = UploadScheduler(store: store, ledger: ledger, destinations: destinations, transport: transport)
 
-        let capture = SegmentedAudioRecorder(settings: .init(segmentDuration: settings.segmentDuration))
+        // ロック中（アプリが裏にいるまま）でも始められる AVAudioRecorder を先に使い、だめなら AVAudioEngine で試す
+        let capture = FallbackAudioCapture(settings: .init(segmentDuration: settings.segmentDuration))
         #if os(iOS)
         let activity: RecordingActivityPresenting = LiveActivityController()
         #else

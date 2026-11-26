@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import AudioCapture
 
@@ -37,5 +38,15 @@ import Testing
         #expect(SegmentedAudioRecorder.dBFS(0) == -.infinity)
         #expect(SegmentedAudioRecorder.dBFS(1) == 0)
         #expect(abs(SegmentedAudioRecorder.dBFS(0.5) - (-6.0206)) < 0.001)
+    }
+}
+
+@Suite struct StartErrorTests {
+    @Test func osStatusCodesReadAsFourCharacters() {
+        #expect(FallbackAudioCapture.fourCC(2003329396) == "what")
+        #expect(FallbackAudioCapture.fourCC(560557684) == "!int")
+        #expect(FallbackAudioCapture.fourCC(-50) == nil)
+        let error = NSError(domain: "com.apple.coreaudio.avfaudio", code: 2003329396)
+        #expect(FallbackAudioCapture.describe(error) == "com.apple.coreaudio.avfaudio 2003329396 'what'")
     }
 }

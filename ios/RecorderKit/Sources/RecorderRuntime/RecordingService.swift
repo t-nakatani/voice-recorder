@@ -5,6 +5,9 @@ import RecorderCore
 import RecordingControl
 import SegmentStore
 import UploadQueue
+#if canImport(UIKit) && os(iOS)
+import UIKit
+#endif
 
 /// 部品を組み立てて「録音する・保存する・送る」を1つにまとめたもの。UI はこれだけを見る。
 /// ロック画面の intent からも RecordingCommandCenter 経由でここが呼ばれる。
@@ -97,11 +100,12 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
 
     // MARK: RecordingCommandHandling
 
-    public func startRecording(trigger: RecordingTrigger) async throws {
+    @discardableResult
+    public func startRecording(trigger: RecordingTrigger) async throws -> String {
         _ = pendingStart.consume(now: clock.now())
         guard activeRecording == nil else {
             Self.logger.notice("start ignored: already recording (trigger=\(trigger.rawValue, privacy: .public))")
-            return
+            return "録音中だったので何もしなかった"
         }
         Self.logger.notice("start trigger=\(trigger.rawValue, privacy: .public)")
         let id = RecordingID.make(at: clock.now())
@@ -110,10 +114,13 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
         isPaused = false
         levelRecordingID = id
 
-        // AudioRecordingIntent の決まり: 録音を始めたら Live Activity を出す
+        // AudioRecordingIntent の決まり: マイクより先に Live Activity を出す（出ていないと裏での録音は止められる）
+        let appState = AppStateProbe.current
+        var activityNote = "LA ok"
         do {
             try activity.begin(recordingID: id.rawValue, state: .init(startedAt: recording.startedAt))
         } catch {
+            activityNote = "LA 失敗(\(error))"
             lastError = "Live Activity を出せませんでした: \(error)"
             Self.logger.error("live activity failed: \(String(describing: error), privacy: .public)")
         }
@@ -139,11 +146,14 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
             activeRecording = nil
             try? store.closeRecording(id: id, endedAt: clock.now(), status: .interrupted)
             await activity.end(recordingID: id.rawValue, state: nil)
-            lastError = "録音を始められませんでした: \(error)"
-            Self.logger.error("capture start failed: \(String(describing: error), privacy: .public)")
-            throw error
+            let note = "\(appState)・\(activityNote)・\(error)"
+            lastError = "録音を始められませんでした: \(note)"
+            Self.logger.error("capture start failed: \(note, privacy: .public)")
+            throw RecordingStartFailure(note: note)
         }
         await refresh()
+        let method = (capture as? FallbackAudioCapture)?.lastMethod ?? "capture"
+        return "\(appState)・\(activityNote)・\(method)"
     }
 
     public func stopRecording() async throws {
@@ -251,5 +261,27 @@ public final class RecordingService: ObservableObject, RecordingCommandHandling 
                 try? ledger.removeAll(for: recording.id)
             }
         }
+    }
+}
+
+/// 始められなかった理由。intent の記録にそのまま出る
+public struct RecordingStartFailure: Error, CustomStringConvertible {
+    public let note: String
+    public var description: String { note }
+}
+
+/// アプリが前面にいたか裏にいたか（intent で裏から起こされたかを記録に残すため）
+enum AppStateProbe {
+    @MainActor static var current: String {
+        #if canImport(UIKit) && os(iOS)
+        switch UIApplication.shared.applicationState {
+        case .active: return "前面"
+        case .inactive: return "前面(非アクティブ)"
+        case .background: return "裏"
+        @unknown default: return "不明"
+        }
+        #else
+        return "-"
+        #endif
     }
 }

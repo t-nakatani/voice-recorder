@@ -13,7 +13,9 @@ public enum RecordingTrigger: String, Codable, Sendable {
 /// App Intents（ウィジェット拡張とアプリの両方で動く）から、アプリ本体の録音処理を呼ぶための窓口。
 /// RecordingControl は RecorderRuntime に依存しないよう、ここに protocol だけを置く。
 public protocol RecordingCommandHandling: AnyObject, Sendable {
-    func startRecording(trigger: RecordingTrigger) async throws
+    /// 始め方の短いメモ（どの方法で録り始めたか、Live Activity、アプリの状態）を返す。intent の記録に残す
+    @discardableResult
+    func startRecording(trigger: RecordingTrigger) async throws -> String
     func stopRecording() async throws
 }
 

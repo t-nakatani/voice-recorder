@@ -42,8 +42,7 @@ struct OpenAndRecordIntent: AppIntent {
         if let handler {
             // アプリのプロセスで動いていれば直接始める（印は handler 側で消す）
             do {
-                try await handler.startRecording(trigger: .controlOpenApp)
-                outcome = "ok"
+                outcome = "ok（\(try await handler.startRecording(trigger: .controlOpenApp))）"
             } catch {
                 outcome = "失敗: \(error)"
                 IntentRun.record("OpenAndRecordIntent", handler: true, outcome: outcome)
@@ -90,14 +89,14 @@ enum IntentRun {
 
     /// handler を取り出して実行し、結果を記録する。handler が無ければ記録してから失敗を投げる。
     static func perform(_ intent: String,
-                        _ body: (RecordingCommandHandling) async throws -> Void) async throws {
+                        _ body: (RecordingCommandHandling) async throws -> String?) async throws {
         guard let handler = RecordingCommandCenter.shared.handler else {
             record(intent, handler: false, outcome: "失敗: handler なし（アプリ本体以外のプロセスで実行された）")
             throw RecordingCommandError.handlerUnavailable
         }
         do {
-            try await body(handler)
-            record(intent, handler: true, outcome: "ok")
+            let note = try await body(handler)
+            record(intent, handler: true, outcome: note.map { "ok（\($0)）" } ?? "ok")
         } catch {
             record(intent, handler: true, outcome: "失敗: \(error)")
             throw error
